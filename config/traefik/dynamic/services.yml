@@ -1,0 +1,90 @@
+http:
+  routers:
+    api:
+      rule: "Host(`api.thedata.io`)"
+      service: api@docker
+      entryPoints:
+        - websecure
+      middlewares:
+        - secure-headers
+        - rate-limit
+        - cors
+        - compression
+        - auth
+      tls:
+        certResolver: letsencrypt
+    
+    grafana:
+      rule: "Host(`grafana.thedata.io`)"
+      service: grafana@docker
+      entryPoints:
+        - websecure
+      middlewares:
+        - secure-headers
+        - cors
+        - compression
+      tls:
+        certResolver: letsencrypt
+    
+    dagster:
+      rule: "Host(`dagster.thedata.io`)"
+      service: dagster@docker
+      entryPoints:
+        - websecure
+      middlewares:
+        - secure-headers
+        - cors
+        - compression
+        - auth
+      tls:
+        certResolver: letsencrypt
+    
+    questdb:
+      rule: "Host(`questdb.thedata.io`)"
+      service: questdb@docker
+      entryPoints:
+        - websecure
+      middlewares:
+        - secure-headers
+        - cors
+        - compression
+        - auth
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    api:
+      loadBalancer:
+        servers:
+          - url: "http://api:8000"
+        healthCheck:
+          path: "/health"
+          interval: "10s"
+          timeout: "3s"
+    
+    grafana:
+      loadBalancer:
+        servers:
+          - url: "http://grafana:3000"
+        healthCheck:
+          path: "/api/health"
+          interval: "30s"
+          timeout: "5s"
+    
+    dagster:
+      loadBalancer:
+        servers:
+          - url: "http://dagster:3000"
+        healthCheck:
+          path: "/health"
+          interval: "30s"
+          timeout: "5s"
+    
+    questdb:
+      loadBalancer:
+        servers:
+          - url: "http://questdb:9000"
+        healthCheck:
+          path: "/health"
+          interval: "30s"
+          timeout: "5s" 

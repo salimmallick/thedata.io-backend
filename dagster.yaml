@@ -1,0 +1,16 @@
+storage:
+  run_storage:
+    module: dagster._core.storage.runs.sql_run_storage
+    class: SqlRunStorage
+    config:
+      postgres_url: postgresql://${DAGSTER_POSTGRES_USER}:${DAGSTER_POSTGRES_PASSWORD}@${DAGSTER_POSTGRES_HOST}:${DAGSTER_POSTGRES_PORT}/${DAGSTER_POSTGRES_DB}
+  event_log_storage:
+    module: dagster._core.storage.event_log.sql_event_log
+    class: SqlEventLogStorage
+    config:
+      postgres_url: postgresql://${DAGSTER_POSTGRES_USER}:${DAGSTER_POSTGRES_PASSWORD}@${DAGSTER_POSTGRES_HOST}:${DAGSTER_POSTGRES_PORT}/${DAGSTER_POSTGRES_DB}
+  schedule_storage:
+    module: dagster._core.storage.schedules.sql_schedule_storage
+    class: SqlScheduleStorage
+    config:
+      postgres_url: postgresql://${DAGSTER_POSTGRES_USER}:${DAGSTER_POSTGRES_PASSWORD}@${DAGSTER_POSTGRES_HOST}:${DAGSTER_POSTGRES_PORT}/${DAGSTER_POSTGRES_DB} 

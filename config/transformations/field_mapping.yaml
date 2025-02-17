@@ -1,0 +1,11 @@
+name: field_mapping
+type: normalize
+enabled: true
+order: 5
+config:
+  mappings:
+    ts: timestamp
+    uid: user_id
+    amt: amount
+    active: is_active
+    desc: description 

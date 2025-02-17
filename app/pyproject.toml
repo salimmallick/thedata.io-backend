@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thedata-dagster"
+version = "0.1.0"
+authors = [
+    { name="theData.io", email="info@thedata.io" },
+]
+description = "theData.io Dagster pipelines"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+] 

@@ -1,0 +1,241 @@
+# Data Quality Alert Rules
+groups:
+  - name: data_quality_alerts
+    rules:
+      # Data Freshness Alerts
+      - alert: DataFreshnessDelayed
+        expr: data_freshness_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data freshness delayed for {{ $labels.source }}"
+          description: "Data is {{ $value }}s old (threshold: 300s)"
+
+      # Schema Change Alerts
+      - alert: SchemaChangeDetected
+        expr: rate(schema_changes_total[1h]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Schema changes detected in {{ $labels.source }}"
+          description: "{{ $value }} schema changes detected in the last hour"
+
+      # Data Quality Status Alerts
+      - alert: DataQualityDegraded
+        expr: data_quality_status < 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data quality degraded for {{ $labels.component }}"
+          description: "Data quality status is {{ $value }} (2=healthy, 1=degraded, 0=unhealthy)"
+
+      # Critical Data Quality Alerts
+      - alert: DataQualityUnhealthy
+        expr: data_quality_status == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Data quality unhealthy for {{ $labels.component }}"
+          description: "Data quality status is unhealthy (0)"
+
+      # Completeness Alerts
+      - alert: LowDataCompleteness
+        expr: data_completeness_ratio < 0.95
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low data completeness in {{ $labels.component }}"
+          description: "Data completeness is {{ $value }}% (threshold: 95%)"
+
+      # Validity Alerts
+      - alert: LowDataValidity
+        expr: data_validity_ratio < 0.90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low data validity in {{ $labels.component }}"
+          description: "Data validity is {{ $value }}% (threshold: 90%)"
+
+  - name: error_recovery_alerts
+    rules:
+      # High Recovery Attempt Rate
+      - alert: HighErrorRecoveryRate
+        expr: rate(error_recovery_attempts_total[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error recovery rate for {{ $labels.error_type }}"
+          description: "Error recovery rate is {{ $value }} per second"
+
+      # Low Recovery Success Rate
+      - alert: LowRecoverySuccessRate
+        expr: error_recovery_success_rate < 0.7
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low recovery success rate for {{ $labels.error_type }}"
+          description: "Recovery success rate is {{ $value }}%"
+
+      # Long Recovery Duration
+      - alert: LongRecoveryDuration
+        expr: histogram_quantile(0.95, rate(error_recovery_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Long recovery duration for {{ $labels.error_type }}"
+          description: "95th percentile recovery duration is {{ $value }}s"
+
+      # Repeated Recovery Failures
+      - alert: RepeatedRecoveryFailures
+        expr: increase(error_recovery_attempts_total{status="failure"}[1h]) > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Repeated recovery failures for {{ $labels.error_type }}"
+          description: "{{ $value }} recovery failures in the last hour"
+
+  - name: query_optimization_alerts
+    rules:
+      # High Slow Query Rate
+      - alert: HighSlowQueryRate
+        expr: rate(slow_queries_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of slow queries for {{ $labels.database }}"
+          description: "{{ $value }} slow queries per second detected"
+
+      # Query Pattern Performance Degradation
+      - alert: QueryPatternDegradation
+        expr: |
+          rate(query_pattern_duration_seconds_sum[5m])
+          / rate(query_pattern_duration_seconds_count[5m])
+          > 2 * avg_over_time(
+            (rate(query_pattern_duration_seconds_sum[5m])
+            / rate(query_pattern_duration_seconds_count[5m]))[1h:]
+          )
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Query pattern performance degradation in {{ $labels.database }}"
+          description: "Pattern {{ $labels.pattern }} showing significant performance degradation"
+
+      # High Failed Optimization Rate
+      - alert: HighFailedOptimizationRate
+        expr: |
+          rate(query_optimizations_total{status="failed"}[5m])
+          / rate(query_optimizations_total{status="total"}[5m])
+          > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of failed query optimizations"
+          description: "More than 20% of query optimizations are failing"
+
+      # Frequent Pattern Recommendations
+      - alert: FrequentPatternRecommendations
+        expr: |
+          sum(rate(optimization_recommendations_total{priority="high"}[15m]))
+          by (database, type)
+          > 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Frequent optimization recommendations for {{ $labels.database }}"
+          description: "High priority recommendations of type {{ $labels.type }} occurring frequently"
+
+  - name: resource_monitoring_alerts
+    rules:
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: avg(cpu_usage_percent) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value }}% (threshold: 80%)"
+
+      # Critical CPU Usage
+      - alert: CriticalCPUUsage
+        expr: avg(cpu_usage_percent) > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical CPU usage detected"
+          description: "CPU usage is {{ $value }}% (threshold: 95%)"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: memory_usage_bytes{type="used"} / memory_usage_bytes{type="total"} * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value }}% (threshold: 85%)"
+
+      # Critical Memory Usage
+      - alert: CriticalMemoryUsage
+        expr: memory_usage_bytes{type="used"} / memory_usage_bytes{type="total"} * 100 > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical memory usage detected"
+          description: "Memory usage is {{ $value }}% (threshold: 95%)"
+
+      # High Disk Usage
+      - alert: HighDiskUsage
+        expr: disk_usage_bytes{type="used"} / disk_usage_bytes{type="total"} * 100 > 85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk usage detected"
+          description: "Disk usage is {{ $value }}% (threshold: 85%)"
+
+      # Critical Disk Usage
+      - alert: CriticalDiskUsage
+        expr: disk_usage_bytes{type="used"} / disk_usage_bytes{type="total"} * 100 > 95
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical disk usage detected"
+          description: "Disk usage is {{ $value }}% (threshold: 95%)"
+
+      # High Network Usage
+      - alert: HighNetworkUsage
+        expr: rate(network_usage_bytes{direction="sent"}[5m]) + rate(network_usage_bytes{direction="received"}[5m]) > 100000000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High network usage detected"
+          description: "Network usage exceeds 100MB/s"
+
+      # Disk I/O Saturation
+      - alert: DiskIOSaturation
+        expr: rate(disk_usage_bytes{type="read"}[5m]) + rate(disk_usage_bytes{type="write"}[5m]) > 50000000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk I/O detected"
+          description: "Disk I/O exceeds 50MB/s" 

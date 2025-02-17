@@ -1,0 +1,55 @@
+api:
+  dashboard: true
+  insecure: false
+
+entryPoints:
+  web:
+    address: ":80"
+  
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+
+  metrics:
+    address: ":8082"
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "admin@thedata.io"
+      storage: "/etc/traefik/acme.json"
+      httpChallenge:
+        entryPoint: web
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: thedata_net
+  
+  file:
+    directory: "/etc/traefik/dynamic"
+    watch: true
+
+log:
+  level: INFO
+  format: json
+
+accessLog:
+  format: json
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addServicesLabels: true
+    addEntryPointsLabels: true
+    buckets:
+      - 0.1
+      - 0.3
+      - 1.2
+      - 5.0
+
+pilot:
+  token: ""

@@ -1,0 +1,47 @@
+http:
+  middlewares:
+    cors:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        accessControlAllowHeaders:
+          - Accept
+          - Authorization
+          - Content-Type
+          - X-Requested-With
+        accessControlAllowOriginList:
+          - "*"
+        accessControlMaxAge: 100
+        addVaryHeader: true
+
+    secure-headers:
+      headers:
+        sslRedirect: true
+        forceSTSHeader: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+
+    compression:
+      compress: {}
+
+  routers:
+    api:
+      rule: "Host(`api.localhost`)"
+      service: api
+      entryPoints:
+        - web
+      middlewares:
+        - cors
+        - secure-headers
+        - compression
+
+  services:
+    api:
+      loadBalancer:
+        servers:
+          - url: "http://api:8000" 

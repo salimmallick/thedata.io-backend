@@ -1,0 +1,83 @@
+# Validation alert rules
+groups:
+  - name: validation_alerts
+    rules:
+      # API Component Health Alerts
+      - alert: APIComponentUnhealthy
+        expr: api_component_health == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API component {{ $labels.component }} is unhealthy"
+          description: "Component has been reporting unhealthy status for 5 minutes"
+
+      # Rate Limiting Validation Alerts
+      - alert: HighRateLimitValidationFailures
+        expr: rate(rate_limit_validation_total{status="failure"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate limit validation failures"
+          description: "Rate limit validation failures are above threshold"
+
+      # Authentication Validation Alerts
+      - alert: HighAuthValidationFailures
+        expr: rate(auth_validation_total{status="failure"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High authentication validation failures"
+          description: "Authentication validation failures are above threshold"
+
+      # Validation Error Alerts
+      - alert: HighValidationErrorRate
+        expr: rate(validation_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High validation error rate"
+          description: "Validation errors are occurring at a high rate"
+
+      # Error Handling Validation Alerts
+      - alert: ErrorHandlingIssues
+        expr: rate(error_handling_validation_total{status="warning"}[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error handling validation issues detected"
+          description: "Multiple error handling issues have been detected"
+
+      # Message Queue Validation Alerts
+      - alert: MessageQueueComponentUnhealthy
+        expr: message_queue_validation == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Message queue component {{ $labels.component }} is unhealthy"
+          description: "Message queue component has been reporting unhealthy status for 5 minutes"
+
+      # Overall Validation Issues Alert
+      - alert: HighValidationIssueCount
+        expr: sum(rate(api_validation_issues_total[5m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of validation issues detected"
+          description: "Multiple validation issues across components have been detected"
+
+      # Validation Status Change Alert
+      - alert: ValidationStatusDegraded
+        expr: sum(api_component_health{status="healthy"}) < count(api_component_health) * 0.8
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Overall validation status degraded"
+          description: "Less than 80% of components are reporting healthy status" 

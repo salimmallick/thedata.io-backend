@@ -1,0 +1,334 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.11.0
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.metrics.address=:8082"
+      - "--log.level=DEBUG"
+    ports:
+      - "80:80"
+      - "8080:8080"
+      - "8082:8082"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/traefik:/etc/traefik
+    networks:
+      - app_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.entrypoints=web"
+
+  api:
+    build:
+      context: .
+      dockerfile: app/api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - PYTHONPATH=/app
+      - POSTGRES_URL=postgresql://postgres:postgres@postgres:5432/postgres?sslmode=disable
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+      - QUESTDB_HOST=questdb
+      - QUESTDB_PORT=9009
+      - REDIS_URL=redis://redis:6379/0
+      - NATS_URL=nats://devtoken123@nats:4222
+      - JAEGER_HOST=jaeger
+      - JAEGER_PORT=6831
+      - GRAFANA_URL=http://grafana:3000
+      - PROMETHEUS_URL=http://prometheus:9090
+      - MATERIALIZE_URL=postgres://materialize@materialize:6875/materialize
+      - DAGSTER_HOME=/opt/dagster/dagster_home
+      - DAGSTER_POSTGRES_USER=postgres
+      - DAGSTER_POSTGRES_PASSWORD=postgres
+      - DAGSTER_POSTGRES_DB=dagster
+    volumes:
+      - .:/app
+    working_dir: /app
+    depends_on:
+      - postgres
+      - redis
+      - nats
+    networks:
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.localhost`)"
+      - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+      - "traefik.http.routers.api.middlewares=cors@file,secure-headers@file,compression@file"
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  dagster:
+    build:
+      context: .
+      dockerfile: Dockerfile.dagster
+    ports:
+      - "3002:3000"
+    volumes:
+      - ./app:/opt/dagster/app
+      - ./config/dagster/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml
+      - ./config/dagster/workspace.yaml:/opt/dagster/dagster_home/workspace.yaml
+      - dagster_logs:/var/log/dagster
+    environment:
+      - DAGSTER_HOME=/opt/dagster/dagster_home
+      - ENVIRONMENT=development
+      - DAGSTER_POSTGRES_HOST=postgres
+      - DAGSTER_POSTGRES_PORT=5432
+      - DAGSTER_POSTGRES_USER=postgres
+      - DAGSTER_POSTGRES_PASSWORD=postgres
+      - DAGSTER_POSTGRES_DB=thedata
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - QUESTDB_HOST=questdb
+      - QUESTDB_PORT=8812
+      - NATS_URL=nats://devtoken123@nats:4222
+      - MATERIALIZE_URL=postgresql://materialize:6875/materialize
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      questdb:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    networks:
+      - app_net
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dagster.rule=Host(`dagster.localhost`)"
+      - "traefik.http.services.dagster.loadbalancer.server.port=3000"
+    command: >
+      bash -c "
+        mkdir -p /opt/dagster/dagster_home &&
+        pip install -e /opt/dagster/app &&
+        dagster-webserver -h 0.0.0.0 -p 3000 -w /opt/dagster/dagster_home/workspace.yaml"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./config/clickhouse/users.xml:/etc/clickhouse-server/users.xml
+      - ./config/clickhouse/config.xml:/etc/clickhouse-server/config.xml
+      - ./config/clickhouse/docker_related_config.xml:/etc/clickhouse-server/config.d/docker_related_config.xml
+    networks:
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.clickhouse.rule=Host(`clickhouse.localhost`)"
+      - "traefik.http.services.clickhouse.loadbalancer.server.port=8123"
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1
+      interval: 1s
+      timeout: 1s
+      retries: 30
+      start_period: 1s
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse
+
+  questdb:
+    image: questdb/questdb:7.3.5
+    container_name: thedataio-backend-questdb-1
+    environment:
+      QDB_HTTP_MIN_WORKER_COUNT: "2"
+      QDB_HTTP_MAX_WORKER_COUNT: "4"
+      QDB_HTTP_SEND_BUFFER_SIZE: "8388608"
+      QDB_HTTP_RECEIVE_BUFFER_SIZE: "8388608"
+      QDB_HTTP_BIND_TO: "0.0.0.0:9001"
+      QDB_PG_ENABLED: "true"
+      QDB_PG_USER: "admin"
+      QDB_PG_PASSWORD: "quest"
+    volumes:
+      - questdb_data:/root/.questdb/db
+      - questdb_conf:/root/.questdb/conf
+      - questdb_checkpoint:/root/.questdb/.checkpoint
+      - questdb_snapshot:/root/.questdb/snapshot
+      - questdb_tmp:/root/.questdb/tmp
+      - questdb_import:/root/.questdb/import
+    ports:
+      - "8812:8812"
+      - "9001:9001"
+      - "9003:9003"
+      - "9009:9009"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "/bin/true"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.questdb.rule=Host(`questdb.localhost`)"
+      - "traefik.http.services.questdb.loadbalancer.server.port=9001"
+      - "traefik.http.middlewares.questdb-headers.headers.accesscontrolallowmethods=GET,OPTIONS,PUT,POST"
+      - "traefik.http.middlewares.questdb-headers.headers.accesscontrolalloworigin=*"
+      - "traefik.http.middlewares.questdb-headers.headers.accesscontrolmaxage=100"
+      - "traefik.http.middlewares.questdb-headers.headers.addvaryheader=true"
+      - "traefik.http.routers.questdb.middlewares=questdb-headers"
+
+  nats:
+    image: nats:2.10.25-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes:
+      - ./config/nats/jetstream.conf:/etc/nats/nats.conf
+      - nats_data:/data/jetstream
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  materialize:
+    image: materialize/materialized:v0.131.0
+    user: materialize
+    environment:
+      - MZ_WORKERS=1
+      - MZ_MEMORY_LIMIT=4GB
+    volumes:
+      - materialize_data:/var/lib/postgresql/data
+    ports:
+      - "6875:6875"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "materialize", "-h", "localhost", "-p", "6875"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+      start_period: 1s
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+      start_period: 1s
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.localhost`)"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  prometheus:
+    image: prom/prometheus:v2.47.2
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.localhost`)"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+
+  redis:
+    image: redis:7.2
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.50
+    ports:
+      - "6831:6831/udp"
+      - "16686:16686"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "localhost:16686"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  clickhouse_data:
+  questdb_data:
+  questdb_conf:
+  questdb_checkpoint:
+  questdb_snapshot:
+  questdb_tmp:
+  questdb_import:
+  postgres_data:
+  grafana_data:
+  prometheus_data:
+  redis_data:
+  dagster_logs:
+  materialize_data:
+  nats_data:
+
+networks:
+  app_net:
+    driver: bridge
+  backend:
+    driver: bridge 

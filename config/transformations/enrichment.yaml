@@ -1,0 +1,7 @@
+name: enrichment
+type: enrich
+enabled: true
+order: 8
+config:
+  ip_fields: ["client_ip", "server_ip", "source_ip"]
+  ua_field: "user_agent" 

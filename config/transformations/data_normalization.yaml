@@ -1,0 +1,8 @@
+name: data_normalization
+type: normalize
+enabled: true
+order: 3
+config:
+  normalizations:
+    event_type: lowercase
+    source: lowercase 

@@ -1,0 +1,11 @@
+name: data_type_conversion
+type: normalize
+enabled: true
+order: 4
+config:
+  conversions:
+    timestamp: datetime
+    user_id: int
+    amount: float
+    is_active: bool
+    description: str 

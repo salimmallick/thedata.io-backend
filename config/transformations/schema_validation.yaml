@@ -1,0 +1,9 @@
+name: schema_validation
+type: validate
+enabled: true
+order: 2
+config:
+  required_fields:
+    - event_type
+    - timestamp
+    - source 

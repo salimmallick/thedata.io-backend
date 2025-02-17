@@ -1,0 +1,31 @@
+# Configuration for dagster.yaml
+
+storage:
+  postgres:
+    postgres_url: postgresql://postgres:postgres@postgres:5432/thedata
+
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+
+run_launcher:
+  module: dagster.core.launcher
+  class: DefaultRunLauncher
+
+telemetry:
+  enabled: false
+
+run_monitoring:
+  enabled: true
+  poll_interval_seconds: 60
+
+run_retries:
+  enabled: true
+  max_retries: 3
+
+scheduler:
+  module: dagster.core.scheduler
+  class: DagsterDaemonScheduler
+
+code_servers:
+  local_startup_timeout: 120

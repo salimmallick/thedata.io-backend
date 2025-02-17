@@ -1,0 +1,47 @@
+# theData.io Platform
+
+A universal data platform for analytics, observability, and insights.
+
+## Core Components
+
+### Data Storage
+- ClickHouse: Event and time-series data storage
+- QuestDB: Real-time metrics and time-series analytics
+- PostgreSQL: Metadata and customer data
+- Materialize: Real-time analytics views
+
+### Message Queue
+- NATS: Event streaming and message broker
+
+### API Layer
+- FastAPI: REST API endpoints
+- Traefik: API Gateway and load balancer
+
+### Data Pipeline
+- Pipeline Service: Data ingestion and processing
+- Materialize Service: Real-time analytics
+- Data Flow Service: Data archival and synchronization
+
+### Customer Management
+- Organization management
+- Multi-tenant data isolation
+- Usage tracking and billing
+- API key management
+
+## Development Setup
+
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Start services:
+   ```bash
+   docker-compose up -d
+   ```
+4. Run migrations:
+   ```bash
+   alembic upgrade head
+   ```
+
+## Architecture 

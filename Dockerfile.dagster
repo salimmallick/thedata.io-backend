@@ -1,0 +1,45 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create dagster user
+RUN useradd -m -U -u 1000 dagster
+
+# Set working directory
+WORKDIR /opt/dagster
+
+# Copy requirements file
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir dagster dagster-graphql dagster-webserver dagster-postgres clickhouse-connect
+
+# Create necessary directories
+RUN mkdir -p /opt/dagster/dagster_home /var/log/dagster && \
+    chown -R dagster:dagster /opt/dagster /var/log/dagster
+
+# Copy project files
+COPY --chown=dagster:dagster pyproject.toml .
+COPY --chown=dagster:dagster app /opt/dagster/app
+COPY --chown=dagster:dagster .env /opt/dagster/.env
+
+# Switch to dagster user
+USER dagster
+
+# Set environment variables
+ENV DAGSTER_HOME=/opt/dagster/dagster_home \
+    PYTHONPATH=/opt/dagster
+
+# Expose ports
+EXPOSE 3000
+
+# Start Dagster
+CMD ["dagster", "dev", "-h", "0.0.0.0", "-p", "3000"] 

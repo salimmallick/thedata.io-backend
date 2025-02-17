@@ -1,0 +1,76 @@
+http:
+  middlewares:
+    cors:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        accessControlAllowHeaders:
+          - Accept
+          - Authorization
+          - Content-Type
+          - X-Requested-With
+          - X-CSRF-Token
+          - X-Process-Time
+          - X-Request-Id
+          - X-Response-Time
+        accessControlAllowOriginList:
+          - "http://localhost:3000"
+          - "http://localhost:8000"
+          - "http://api.localhost"
+          - "http://*.localhost"
+        accessControlAllowCredentials: true
+        accessControlExposeHeaders:
+          - Content-Length
+          - Content-Type
+          - X-Process-Time
+          - X-Request-Id
+          - X-Response-Time
+        accessControlMaxAge: 100
+        addVaryHeader: true
+
+    secure-headers:
+      headers:
+        frameDeny: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+        customFrameOptionsValue: "SAMEORIGIN"
+
+    compression:
+      compress: {}
+
+  routers:
+    api:
+      rule: "Host(`api.localhost`)"
+      service: api
+      entryPoints:
+        - web
+      middlewares:
+        - cors
+        - secure-headers
+        - compression
+
+  services:
+    api:
+      loadBalancer:
+        servers:
+          - url: "http://api:8000"
+
+tls:
+  options:
+    default:
+      minVersion: "VersionTLS12"
+      cipherSuites:
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305 

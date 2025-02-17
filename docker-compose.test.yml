@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  nats-test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    environment:
+      CLICKHOUSE_HOST: clickhouse-test
+      CLICKHOUSE_PORT: 9000
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      POSTGRES_HOST: postgres-test
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: testdb
+      REDIS_HOST: redis-test
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      NATS_URL: nats://nats-test:4222
+      ENVIRONMENT: test
+      PYTHONPATH: /app
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres-test
+      - clickhouse-test
+      - redis-test
+      - nats-test
+    networks:
+      - test-network
+
+  postgres-test:
+    image: postgres:15.3
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: testdb
+    networks:
+      - test-network
+
+  clickhouse-test:
+    image: clickhouse/clickhouse-server:23.8.8.20
+    environment:
+      - CLICKHOUSE_LISTEN_HOST=0.0.0.0
+      - CLICKHOUSE_TCP_PORT=9000
+      - CLICKHOUSE_HTTP_PORT=8123
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_DATABASE=default
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+      - CLICKHOUSE_LOG_LEVEL=trace
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    volumes:
+      - ./config/clickhouse/users.xml:/etc/clickhouse-server/users.xml
+      - ./config/clickhouse/config.xml:/etc/clickhouse-server/config.xml
+      - ./config/clickhouse/docker_related_config.xml:/etc/clickhouse-server/config.d/docker_related_config.xml
+    networks:
+      - test-network
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 1s
+      timeout: 1s
+      retries: 30
+      start_period: 1s
+
+  redis-test:
+    image: redis:7.0.11
+    networks:
+      - test-network
+
+  nats-test:
+    image: nats:2.9.17
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

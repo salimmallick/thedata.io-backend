@@ -1,0 +1,11 @@
+name: data_masking
+type: normalize
+enabled: true
+order: 6
+config:
+  patterns:
+    email_address: email
+    phone_number: phone
+    credit_card_number: credit_card
+    ssn: "\d{3}-\d{2}-\d{4}"
+    api_key: "[A-Za-z0-9]{32}" 
