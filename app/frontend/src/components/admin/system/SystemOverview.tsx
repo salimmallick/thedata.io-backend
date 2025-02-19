@@ -24,12 +24,10 @@ import {
     Done as DoneIcon,
     Refresh as RefreshIcon
 } from '@mui/icons-material';
-import { SystemMetrics, SystemOverview as SystemOverviewType } from '../../../types/admin';
 import { adminService } from '../../../services/adminService';
-import { MetricsChart } from './MetricsChart';
 
 export const SystemOverview: React.FC = () => {
-    const [overview, setOverview] = useState<SystemOverviewType | null>(null);
+    const [overview, setOverview] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
@@ -44,32 +42,25 @@ export const SystemOverview: React.FC = () => {
         try {
             setRefreshing(true);
             const data = await adminService.getSystemOverview();
+            console.log('System overview data:', data);
             setOverview(data);
             setError(null);
         } catch (err) {
+            console.error('Failed to load system overview:', err);
             setError('Failed to load system overview');
-            console.error(err);
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
     };
 
-    const handleAcknowledgeAlert = async (alertId: string) => {
-        try {
-            await adminService.acknowledgeAlert(alertId);
-            await loadOverview();
-        } catch (err) {
-            setError('Failed to acknowledge alert');
-            console.error(err);
-        }
-    };
-
     const getStatusIcon = (status: string) => {
         switch (status) {
             case 'healthy':
+            case 'ok':
                 return <HealthyIcon color="success" />;
             case 'degraded':
+            case 'warning':
                 return <DegradedIcon color="warning" />;
             case 'error':
                 return <ErrorIcon color="error" />;
@@ -78,24 +69,19 @@ export const SystemOverview: React.FC = () => {
         }
     };
 
-    const getAlertSeverityColor = (severity: string) => {
-        switch (severity) {
-            case 'error':
-                return 'error';
-            case 'warning':
-                return 'warning';
-            case 'info':
-                return 'info';
-            default:
-                return 'default';
-        }
-    };
-
     if (loading) {
         return (
             <Box display="flex" justifyContent="center" p={3}>
                 <CircularProgress />
             </Box>
+        );
+    }
+
+    if (!overview?.metrics) {
+        return (
+            <Alert severity="error" sx={{ mb: 2 }}>
+                {error || 'No system metrics available'}
+            </Alert>
         );
     }
 
@@ -133,11 +119,12 @@ export const SystemOverview: React.FC = () => {
                                             CPU Usage
                                         </Typography>
                                         <Typography variant="h4">
-                                            {overview?.metrics.cpu_usage.toFixed(1)}%
+                                            {overview.metrics.cpu?.usage_percent?.toFixed(1)}%
                                         </Typography>
                                         <LinearProgress
                                             variant="determinate"
-                                            value={overview?.metrics.cpu_usage || 0}
+                                            value={overview.metrics.cpu?.usage_percent || 0}
+                                            color={overview.metrics.cpu?.above_threshold ? "error" : "primary"}
                                             sx={{ mt: 1 }}
                                         />
                                     </CardContent>
@@ -150,21 +137,33 @@ export const SystemOverview: React.FC = () => {
                                             Memory Usage
                                         </Typography>
                                         <Typography variant="h4">
-                                            {overview?.metrics.memory_usage.toFixed(1)}%
+                                            {overview.metrics.memory?.percent?.toFixed(1)}%
                                         </Typography>
                                         <LinearProgress
                                             variant="determinate"
-                                            value={overview?.metrics.memory_usage || 0}
+                                            value={overview.metrics.memory?.percent || 0}
+                                            color={overview.metrics.memory?.above_threshold ? "error" : "primary"}
                                             sx={{ mt: 1 }}
                                         />
                                     </CardContent>
                                 </Card>
                             </Grid>
-                            <Grid item xs={12}>
-                                <MetricsChart 
-                                    data={overview?.metrics ? [overview.metrics] : undefined}
-                                    timeRange="24h"
-                                />
+                            <Grid item xs={12} md={6}>
+                                <Card>
+                                    <CardContent>
+                                        <Typography color="textSecondary" gutterBottom>
+                                            Disk Usage
+                                        </Typography>
+                                        <Typography variant="h4">
+                                            {overview.metrics.disk?.percent?.toFixed(1)}%
+                                        </Typography>
+                                        <LinearProgress
+                                            variant="determinate"
+                                            value={overview.metrics.disk?.percent || 0}
+                                            sx={{ mt: 1 }}
+                                        />
+                                    </CardContent>
+                                </Card>
                             </Grid>
                         </Grid>
                     </Paper>
@@ -177,77 +176,65 @@ export const SystemOverview: React.FC = () => {
                             Component Status
                         </Typography>
                         <List>
-                            {overview?.components.map((component) => (
-                                <ListItem key={component.name}>
-                                    <ListItemText
-                                        primary={component.name}
-                                        secondary={component.message}
-                                    />
-                                    <ListItemSecondaryAction>
-                                        {getStatusIcon(component.status)}
-                                    </ListItemSecondaryAction>
-                                </ListItem>
-                            ))}
+                            <ListItem>
+                                <ListItemText
+                                    primary="API Server"
+                                    secondary={overview.status}
+                                />
+                                <ListItemSecondaryAction>
+                                    {getStatusIcon(overview.status)}
+                                </ListItemSecondaryAction>
+                            </ListItem>
+                            <ListItem>
+                                <ListItemText
+                                    primary="Database"
+                                    secondary={overview.health ? "Connected" : "Not Connected"}
+                                />
+                                <ListItemSecondaryAction>
+                                    {getStatusIcon(overview.health ? "healthy" : "error")}
+                                </ListItemSecondaryAction>
+                            </ListItem>
                         </List>
                     </Paper>
                 </Grid>
 
-                {/* Alerts */}
+                {/* System Alerts */}
                 <Grid item xs={12}>
                     <Paper sx={{ p: 2 }}>
                         <Typography variant="h6" gutterBottom>
-                            Active Alerts
+                            System Alerts
                         </Typography>
                         <List>
-                            {overview?.alerts
-                                .filter((alert) => !alert.acknowledged)
-                                .map((alert) => (
-                                    <ListItem key={alert.id}>
-                                        <ListItemText
-                                            primary={alert.message}
-                                            secondary={new Date(alert.timestamp).toLocaleString()}
-                                        />
-                                        <ListItemSecondaryAction>
-                                            <Chip
-                                                label={alert.severity}
-                                                color={getAlertSeverityColor(alert.severity)}
-                                                size="small"
-                                                sx={{ mr: 1 }}
+                            {(overview.metrics.cpu?.above_threshold || overview.metrics.memory?.above_threshold) ? (
+                                <>
+                                    {overview.metrics.cpu?.above_threshold && (
+                                        <ListItem>
+                                            <ListItemText
+                                                primary="High CPU Usage"
+                                                secondary={`Current usage: ${overview.metrics.cpu.usage_percent.toFixed(1)}%`}
                                             />
-                                            <Tooltip title="Acknowledge">
-                                                <IconButton
-                                                    edge="end"
-                                                    size="small"
-                                                    onClick={() => handleAcknowledgeAlert(alert.id)}
-                                                >
-                                                    <DoneIcon />
-                                                </IconButton>
-                                            </Tooltip>
-                                        </ListItemSecondaryAction>
-                                    </ListItem>
-                                ))}
-                        </List>
-                    </Paper>
-                </Grid>
-
-                {/* Recent Events */}
-                <Grid item xs={12}>
-                    <Paper sx={{ p: 2 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Recent Events
-                        </Typography>
-                        <List>
-                            {overview?.events.map((event) => (
-                                <ListItem key={event.id}>
+                                            <Chip label="Warning" color="warning" />
+                                        </ListItem>
+                                    )}
+                                    {overview.metrics.memory?.above_threshold && (
+                                        <ListItem>
+                                            <ListItemText
+                                                primary="High Memory Usage"
+                                                secondary={`Current usage: ${overview.metrics.memory.percent.toFixed(1)}%`}
+                                            />
+                                            <Chip label="Warning" color="warning" />
+                                        </ListItem>
+                                    )}
+                                </>
+                            ) : (
+                                <ListItem>
                                     <ListItemText
-                                        primary={event.message}
-                                        secondary={new Date(event.timestamp).toLocaleString()}
+                                        primary="No active alerts"
+                                        secondary="System is running normally"
                                     />
-                                    <ListItemSecondaryAction>
-                                        <Chip label={event.type} size="small" />
-                                    </ListItemSecondaryAction>
+                                    <Chip label="Healthy" color="success" />
                                 </ListItem>
-                            ))}
+                            )}
                         </List>
                     </Paper>
                 </Grid>

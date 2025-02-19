@@ -1,0 +1,12 @@
+comment: ''
+config:
+  comment: Rule configuration updated
+  config:
+    config: {}
+    enabled: true
+    name: fieldfilterrule
+    order: 4
+    type: filter
+  timestamp: '2025-02-18T16:27:01.594113'
+created_at: '2025-02-18T16:27:01.602310'
+version: 120

@@ -37,12 +37,12 @@ export const AdminLayout: React.FC = () => {
     const location = useLocation();
 
     const menuItems = [
-        { path: '/admin', label: 'System Overview', icon: <DashboardIcon /> },
-        { path: '/admin/users', label: 'Users', icon: <PeopleIcon /> },
-        { path: '/admin/organizations', label: 'Organizations', icon: <BusinessIcon /> },
-        { path: '/admin/data-management', label: 'Data Management', icon: <StorageIcon /> },
-        { path: '/admin/pipeline', label: 'Data Pipeline', icon: <AnalyticsIcon /> },
-        { path: '/admin/billing', label: 'Billing', icon: <BillingIcon /> }
+        { path: '/system', label: 'System Overview', icon: <DashboardIcon /> },
+        { path: '/users', label: 'Users', icon: <PeopleIcon /> },
+        { path: '/organizations', label: 'Organizations', icon: <BusinessIcon /> },
+        { path: '/data-management', label: 'Data Management', icon: <StorageIcon /> },
+        { path: '/pipeline', label: 'Data Pipeline', icon: <AnalyticsIcon /> },
+        { path: '/billing', label: 'Billing', icon: <BillingIcon /> }
     ];
 
     const handleDrawerToggle = () => {

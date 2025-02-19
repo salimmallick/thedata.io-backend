@@ -40,12 +40,13 @@ export const useAuth = () => {
 
   const checkAuthStatus = async () => {
     try {
-      const response = await api.get<User>('/auth/users/me');
+      const response = await api.get<User>('/api/v1/auth/me');
       setAuthState({
         user: response.data,
         isAuthenticated: true,
         isLoading: false
       });
+      return true;
     } catch (error) {
       console.error('Auth status check failed:', error);
       localStorage.removeItem('auth_token');
@@ -54,6 +55,7 @@ export const useAuth = () => {
         isAuthenticated: false,
         isLoading: false
       });
+      return false;
     }
   };
 
@@ -62,13 +64,13 @@ export const useAuth = () => {
       const response = await apiLogin(email, password);
       if (response.access_token) {
         const userData = response.user;
-        setAuthState(prev => ({
-          ...prev,
+        setAuthState({
           user: userData,
           isAuthenticated: true,
           isLoading: false
-        }));
+        });
         localStorage.setItem('auth_token', response.access_token);
+        await checkAuthStatus(); // Verify token and get full user data
         return true;
       }
       return false;

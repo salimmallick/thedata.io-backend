@@ -1,24 +1,36 @@
+"""
+Monitoring configuration settings.
+"""
 from pydantic_settings import BaseSettings
+from pydantic import Field
 
-
-class Settings(BaseSettings):
-    """Settings for monitoring and tracing."""
-    JAEGER_HOST: str = "jaeger"
-    JAEGER_PORT: int = 6831
-    JAEGER_ENABLED: bool = True
-    SERVICE_NAME: str = "thedata-api"
-    ENVIRONMENT: str = "development"
-
-    # ClickHouse settings
-    CLICKHOUSE_HOST: str = "clickhouse"
-    CLICKHOUSE_PORT: int = 9000
-    CLICKHOUSE_USER: str = "default"
-    CLICKHOUSE_PASSWORD: str = ""
-    CLICKHOUSE_DATABASE: str = "default"
-
+class MonitoringSettings(BaseSettings):
+    """Monitoring configuration settings."""
+    
+    # Service settings
+    SERVICE_NAME: str = Field(default="thedata-api", description="Name of the service for monitoring")
+    ENVIRONMENT: str = Field(default="development", description="Environment (development, staging, production)")
+    
+    # Prometheus settings
+    PROMETHEUS_ENABLED: bool = Field(default=True, description="Enable Prometheus metrics")
+    PROMETHEUS_PORT: int = Field(default=9090, description="Port for Prometheus metrics server")
+    PROMETHEUS_HOST: str = Field(default="0.0.0.0", description="Host for Prometheus metrics server")
+    
+    # Tracing settings
+    JAEGER_HOST: str = Field(default="jaeger", description="Jaeger host")
+    JAEGER_PORT: int = Field(default=6831, description="Jaeger port")
+    JAEGER_ENABLED: bool = Field(default=True, description="Enable Jaeger tracing")
+    
+    # Health check settings
+    HEALTH_CHECK_INTERVAL: int = Field(default=60, description="Health check interval in seconds")
+    
+    # Metric collection settings
+    METRIC_COLLECTION_INTERVAL: int = Field(default=30, description="Metric collection interval in seconds")
+    
     class Config:
+        env_prefix = "MONITORING_"
         case_sensitive = False
-        extra = "allow"
 
+settings = MonitoringSettings()
 
-settings = Settings() 
+__all__ = ['settings', 'MonitoringSettings'] 

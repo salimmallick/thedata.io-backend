@@ -1,0 +1,12 @@
+comment: ''
+config:
+  comment: Rule configuration updated
+  config:
+    config: {}
+    enabled: true
+    name: schemavalidationrule
+    order: 2
+    type: validation
+  timestamp: '2025-02-18T15:16:37.979197'
+created_at: '2025-02-18T15:16:38.002419'
+version: 108

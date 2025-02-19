@@ -31,13 +31,20 @@ export const Login: React.FC = () => {
       console.log('Login response:', success);
       
       if (success) {
+        console.log('Login successful, redirecting to /system');
         navigate('/system', { replace: true });
       } else {
         setError('Invalid email or password');
       }
     } catch (err: any) {
       console.error('Login error:', err);
-      setError(err?.response?.data?.detail || 'An error occurred during login. Please try again.');
+      if (err?.response?.status === 401) {
+        setError('Invalid email or password');
+      } else if (err?.response?.data?.detail) {
+        setError(err.response.data.detail);
+      } else {
+        setError('An error occurred during login. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }

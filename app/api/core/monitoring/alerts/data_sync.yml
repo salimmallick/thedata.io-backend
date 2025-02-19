@@ -1,0 +1,84 @@
+groups:
+  - name: data_sync_alerts
+    rules:
+      - alert: HighSyncErrorRate
+        expr: |
+          rate(sync_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High sync error rate for {{ $labels.source_type }}
+          description: Sync error rate is {{ $value | humanize }} errors/sec for {{ $labels.source_type }} ({{ $labels.error_type }})
+      
+      - alert: SyncDurationHigh
+        expr: |
+          histogram_quantile(0.95, rate(sync_duration_seconds_bucket[5m])) > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Sync duration too high for {{ $labels.source_type }}
+          description: 95th percentile sync duration is {{ $value | humanize }}s for {{ $labels.source_type }}
+      
+      - alert: HighRecoveryFailureRate
+        expr: |
+          (rate(sync_recovery_attempts_total[5m]) - rate(sync_recovery_success_total[5m])) / rate(sync_recovery_attempts_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: High recovery failure rate for {{ $labels.source_type }}
+          description: More than 50% of recovery attempts are failing for {{ $labels.source_type }}
+      
+      - alert: NoSuccessfulSyncs
+        expr: |
+          absent(rate(sync_operations_total{status="completed"}[30m]) > 0)
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: No successful syncs in the last 30 minutes
+          description: No data sources have completed a successful sync in the last 30 minutes
+      
+      - alert: RecoveryDurationHigh
+        expr: |
+          histogram_quantile(0.95, rate(sync_recovery_duration_seconds_bucket[5m])) > 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Recovery duration too high for {{ $labels.source_type }}
+          description: 95th percentile recovery duration is {{ $value | humanize }}s for {{ $labels.source_type }}
+      
+      - alert: ConsecutiveRecoveryFailures
+        expr: |
+          count_over_time(sync_recovery_failure_total[1h]) > 5
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: Multiple consecutive recovery failures for {{ $labels.source_type }}
+          description: More than 5 consecutive recovery failures in the last hour for {{ $labels.source_type }}
+      
+      - alert: SyncStalled
+        expr: |
+          time() - max(sync_operations_total{status="completed"}) by (source_type) > 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Sync operations stalled for {{ $labels.source_type }}
+          description: No sync operations completed in the last hour for {{ $labels.source_type }}
+      
+      - alert: HighErrorRateAfterRecovery
+        expr: |
+          rate(sync_errors_total[5m]) > 0.1
+          and
+          rate(sync_recovery_success_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: High error rate after recovery for {{ $labels.source_type }}
+          description: Error rate remains high after successful recovery for {{ $labels.source_type }} 

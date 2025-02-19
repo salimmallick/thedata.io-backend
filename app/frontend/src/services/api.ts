@@ -29,21 +29,29 @@ export const login = async (email: string, password: string) => {
   formData.append('username', email);
   formData.append('password', password);
   
-  const response = await api.post(
-    '/api/v1/auth/login',
-    formData,
-    {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+  try {
+    const response = await api.post(
+      '/api/v1/auth/login',
+      formData,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
       }
+    );
+    
+    if (response.data.access_token) {
+      localStorage.setItem('auth_token', response.data.access_token);
+      // Set the token in the default headers for future requests
+      api.defaults.headers.common['Authorization'] = `Bearer ${response.data.access_token}`;
+      return response.data;
     }
-  );
-  
-  if (response.data.access_token) {
-    localStorage.setItem('auth_token', response.data.access_token);
+    
+    throw new Error('Invalid response from server');
+  } catch (error) {
+    console.error('Login error:', error);
+    throw error;
   }
-  
-  return response.data;
 };
 
 // Add request interceptor for authentication
@@ -86,7 +94,7 @@ export const auth = {
   login: (credentials: any) => api.post('/api/v1/auth/login', credentials),
   logout: () => api.post('/api/v1/auth/logout'),
   refreshToken: () => api.post('/api/v1/auth/refresh'),
-  me: () => api.get('/api/v1/auth/users/me')
+  me: () => api.get('/api/v1/auth/me')
 };
 
 // Data Management endpoints

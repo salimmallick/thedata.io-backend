@@ -1,16 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import Dict, Any, List
+from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel
+from datetime import datetime
+import logging
 
 from ..models.admin import SystemConfig, MetricsConfig, AlertConfig
 from ..services.admin_service import AdminService
 from ..core.auth.security import get_current_user_token, PermissionChecker
-from ..core.config import settings
+from ..core.config.settings import settings
 from ..models.user import UserRole
+from ..services.pipeline import pipeline_service
 
-router = APIRouter(
-    prefix=f"{settings.API_V1_STR}/admin",
-    tags=["admin"]
-)
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["Administration"])
 
 admin_service = AdminService()
 
@@ -18,7 +21,7 @@ admin_service = AdminService()
 require_admin = PermissionChecker(["admin"])
 
 async def get_current_admin_user(token_data = Depends(get_current_user_token)):
-    if token_data.role != UserRole.ADMIN:
+    if token_data["role"].lower() != UserRole.ADMIN.value.lower():
         raise HTTPException(
             status_code=403,
             detail="Admin access required"
@@ -87,4 +90,44 @@ async def acknowledge_alert(
         admin_service.acknowledge_alert(alert_id)
         return {"status": "success", "message": f"Alert {alert_id} acknowledged"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e)) 
+        raise HTTPException(status_code=400, detail=str(e))
+
+class PipelineComponent(BaseModel):
+    id: str
+    name: str
+    status: str
+    health: str
+    metrics: Dict[str, float]
+    config: Dict[str, Any]
+    description: Optional[str] = None
+    version: Optional[str] = None
+    last_updated: Optional[datetime] = None
+
+class PipelineAlert(BaseModel):
+    id: str
+    severity: str
+    message: str
+    component_id: str
+    timestamp: datetime
+    resolved: bool
+
+class DataPipeline(BaseModel):
+    components: List[PipelineComponent]
+    alerts: List[PipelineAlert]
+    overall_health: str
+    metrics: Dict[str, float]
+
+@router.get("/pipeline/status", response_model=DataPipeline)
+async def get_pipeline_status(token = Depends(require_admin)):
+    """Get overall pipeline status"""
+    components = await pipeline_service.list_components()
+    alerts = await pipeline_service.list_alerts()
+    overall_health = await pipeline_service.get_overall_health()
+    metrics = await pipeline_service.get_overall_metrics()
+    
+    return {
+        "components": components,
+        "alerts": alerts,
+        "overall_health": overall_health,
+        "metrics": metrics
+    } 

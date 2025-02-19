@@ -1,0 +1,12 @@
+comment: ''
+config:
+  comment: Rule configuration updated
+  config:
+    config: {}
+    enabled: true
+    name: datanormalizationrule
+    order: 3
+    type: normalization
+  timestamp: '2025-02-18T10:18:07.086781'
+created_at: '2025-02-18T10:18:07.089811'
+version: 48

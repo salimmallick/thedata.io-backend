@@ -1,233 +1,146 @@
+"""
+Authentication router.
+"""
+from datetime import timedelta
+from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from typing import List, Dict, Any
-from datetime import timedelta
+from ..models.user import Token, User, UserCreate, UserRole
 from ..core.auth.security import (
-    verify_password,
+    authenticate_user,
     create_access_token,
     get_current_user_token,
-    PermissionChecker,
     get_password_hash
 )
-from ..core.storage.database import get_postgres_conn
-from ..models.user import (
-    User,
-    UserCreate,
-    UserUpdate,
-    Token,
-    TokenData,
-    UserRole
-)
-import asyncpg
+from ..core.config.settings import Settings
+from ..core.database import db_pool
 import logging
-from ..core.storage.database_pool import postgres_pool, init_postgres_pool, db_pool
-from fastapi import Request
-from ..core.config import settings
 
 logger = logging.getLogger(__name__)
+settings = Settings()
 
-class InvalidCredentialsError(HTTPException):
-    """Exception raised when login credentials are invalid."""
-    def __init__(self):
-        super().__init__(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-router = APIRouter(prefix=f"{settings.API_V1_STR}/auth", tags=["Authentication"])
-
-# Permission checkers
-require_admin = PermissionChecker(["admin"])
-require_user_management = PermissionChecker(["manage_users"])
-
-@router.post("/login")
-async def login(
-    request: Request,
-    form_data: OAuth2PasswordRequestForm = Depends()
-) -> Dict[str, Any]:
-    """Login endpoint that returns a JWT token"""
-    
+@router.post("/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, str]:
+    """Login user and return access token."""
     try:
         async with db_pool.postgres_connection() as conn:
-            # First check if the user exists and is active
-            user = await conn.fetchrow(
-                """
-                SELECT id, email, full_name, is_superuser, hashed_password
+            # Get user by email (using username field from form as email)
+            user = await conn.fetchrow("""
+                SELECT id, email, hashed_password, role, full_name, is_active
                 FROM users
-                WHERE email = $1 AND is_active = true
-                """,
-                form_data.username
-            )
+                WHERE email = $1
+            """, form_data.username)
             
             if not user:
-                raise InvalidCredentialsError()
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Incorrect email or password",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            if not user["is_active"]:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User account is inactive",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
             
-            # Verify password
-            if not verify_password(form_data.password, user['hashed_password']):
-                raise InvalidCredentialsError()
+            if not await authenticate_user(form_data.password, user["hashed_password"]):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Incorrect email or password",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
             
-            # Create access token
+            access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
             access_token = create_access_token(
                 data={
-                    "sub": str(user['id']),
-                    "email": user['email'],
-                    "full_name": user['full_name'],
-                    "role": "admin" if user['is_superuser'] else "viewer"
-                }
+                    "sub": user["email"],
+                    "role": user["role"],
+                    "full_name": user["full_name"]
+                },
+                expires_delta=access_token_expires
             )
             
             return {
                 "access_token": access_token,
                 "token_type": "bearer",
                 "user": {
-                    "id": str(user['id']),
-                    "email": user['email'],
-                    "full_name": user['full_name'],
-                    "role": "admin" if user['is_superuser'] else "viewer",
-                    "isAdmin": user['is_superuser'],
-                    "permissions": ["admin"] if user['is_superuser'] else ["viewer"]
+                    "email": user["email"],
+                    "role": user["role"],
+                    "full_name": user["full_name"]
                 }
             }
-            
-    except asyncpg.PostgresError as e:
-        logger.error(f"Database error during login: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error during login"
-        )
     except Exception as e:
-        logger.error(f"Unexpected error during login: {str(e)}")
+        logger.error(f"Login error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
-        )
+        ) from e
 
-@router.post("/users", response_model=User)
-async def create_user(
-    user_in: UserCreate,
-    token: TokenData = Depends(require_admin)
-):
-    """Create new user (admin only)."""
-    async with get_postgres_conn() as conn:
-        # Check if user exists
-        existing_user = await conn.fetchval(
-            "SELECT id FROM users WHERE email = $1",
-            user_in.email
-        )
-        if existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
-            )
-        
-        # Create user
-        user = await conn.fetchrow(
-            """
-            INSERT INTO users (email, full_name, role, hashed_password, is_active)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, email, full_name, role, is_active, created_at, updated_at
-            """,
-            user_in.email,
-            user_in.full_name,
-            user_in.role,
-            get_password_hash(user_in.password),
-            user_in.is_active
-        )
-        
-        return User(**user)
-
-@router.get("/users", response_model=List[User])
-async def list_users(
-    token: TokenData = Depends(require_user_management)
-):
-    """List all users (requires user management permission)."""
-    async with get_postgres_conn() as conn:
-        users = await conn.fetch("SELECT * FROM users")
-        return [User(**user) for user in users]
-
-@router.get("/users/me", response_model=User)
-async def get_current_user(
-    token: TokenData = Depends(get_current_user_token)
-):
-    """Get current user information."""
+@router.post("/register", response_model=User)
+async def register(user: UserCreate) -> Dict[str, Any]:
+    """Register a new user."""
     try:
         async with db_pool.postgres_connection() as conn:
-            user = await conn.fetchrow(
-                """
-                SELECT id, email, full_name, is_superuser, is_active, created_at, updated_at
+            # Start transaction
+            async with conn.transaction():
+                # Check if user already exists
+                existing_user = await conn.fetchrow("""
+                    SELECT id FROM users WHERE email = $1
+                """, user.email)
+                
+                if existing_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Email already registered"
+                    )
+                
+                # Create new user
+                hashed_password = get_password_hash(user.password)
+                new_user = await conn.fetchrow("""
+                    INSERT INTO users (email, hashed_password, full_name, role, is_active)
+                    VALUES ($1, $2, $3, $4, true)
+                    RETURNING id, email, full_name, role, is_active, created_at, updated_at
+                """, user.email, hashed_password, user.full_name, UserRole.USER)
+                
+                # Convert id to string and return user data
+                user_data = dict(new_user)
+                user_data["id"] = str(user_data["id"])
+                return user_data
+    except Exception as e:
+        logger.error(f"Error during registration: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        ) from e
+
+@router.get("/me", response_model=User)
+async def get_current_user(current_user: Dict[str, Any] = Depends(get_current_user_token)) -> Dict[str, Any]:
+    """Get current user details."""
+    try:
+        async with db_pool.postgres_connection() as conn:
+            user = await conn.fetchrow("""
+                SELECT id, email, full_name, role, is_active, created_at, updated_at
                 FROM users
                 WHERE id = $1 AND is_active = true
-                """,
-                int(token.sub)  # Use the user ID from the token
-            )
+            """, current_user["id"])
             
             if not user:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found"
+                    detail="User not found or inactive"
                 )
             
-            # Convert to response format
-            return {
-                "id": str(user['id']),
-                "email": user['email'],
-                "full_name": user['full_name'],
-                "role": "admin" if user['is_superuser'] else "viewer",
-                "is_active": user['is_active'],
-                "created_at": user['created_at'],
-                "updated_at": user['updated_at'],
-                "isAdmin": user['is_superuser'],
-                "permissions": ["admin"] if user['is_superuser'] else ["viewer"]
-            }
-            
-    except asyncpg.PostgresError as e:
-        logger.error(f"Database error in get_current_user: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
+            # Convert id to string and return user data
+            user_data = dict(user)
+            user_data["id"] = str(user_data["id"])
+            return user_data
     except Exception as e:
-        logger.error(f"Unexpected error in get_current_user: {str(e)}")
+        logger.error(f"Error getting current user: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
-        )
-
-@router.put("/users/{user_id}", response_model=User)
-async def update_user(
-    user_id: int,
-    user_in: UserUpdate,
-    token: TokenData = Depends(require_user_management)
-):
-    """Update user information (requires user management permission)."""
-    async with get_postgres_conn() as conn:
-        # Check if user exists
-        existing_user = await conn.fetchrow(
-            "SELECT * FROM users WHERE id = $1",
-            user_id
-        )
-        if not existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        
-        # Update user
-        update_dict = user_in.dict(exclude_unset=True)
-        if "password" in update_dict:
-            update_dict["hashed_password"] = get_password_hash(update_dict.pop("password"))
-        
-        if update_dict:
-            fields = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(update_dict.keys()))
-            values = list(update_dict.values())
-            query = f"""
-                UPDATE users 
-                SET {fields}, updated_at = NOW()
-                WHERE id = $1
-                RETURNING id, email, full_name, role, is_active, created_at, updated_at
-            """
-            user = await conn.fetchrow(query, user_id, *values)
-            return User(**user)
-        
-        return User(**existing_user) 
+        ) from e 

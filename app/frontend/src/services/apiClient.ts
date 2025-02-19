@@ -1,12 +1,13 @@
 import axios from 'axios';
 
-const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const baseURL = process.env.REACT_APP_API_URL || 'http://api.localhost';
 
 export const apiClient = axios.create({
     baseURL,
     headers: {
         'Content-Type': 'application/json'
-    }
+    },
+    timeout: 10000 // 10 second timeout
 });
 
 // Add request interceptor to include auth token
@@ -46,6 +47,10 @@ apiClient.interceptors.response.use(
                 case 422:
                     // Validation error
                     console.error('Validation error:', error.response.data);
+                    break;
+                case 504:
+                    // Gateway timeout
+                    console.error('Gateway timeout - server not responding');
                     break;
                 default:
                     // Other errors

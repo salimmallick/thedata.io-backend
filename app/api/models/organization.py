@@ -24,6 +24,7 @@ class DataSourceType(str, Enum):
 
 class OrganizationBase(BaseModel):
     name: str
+    slug: Annotated[str, Field(pattern=r"^[a-z0-9-]+$")] = Field(default="")
 
 class OrganizationCreate(OrganizationBase):
     pass
@@ -32,19 +33,12 @@ class OrganizationUpdate(OrganizationBase):
     name: Optional[str] = None
     api_key: Optional[str] = None
 
-class Organization(OrganizationBase):
-    id: str
-    api_key: str
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
 class Organization(BaseModel):
     """Organization model for customer management"""
     org_id: UUID4
     name: str
     slug: Annotated[str, Field(pattern=r"^[a-z0-9-]+$")]
+    api_key: str
     status: OrganizationStatus = OrganizationStatus.ACTIVE
     subscription_tier: SubscriptionTier = SubscriptionTier.FREE
     settings: Dict[str, Any] = Field(default_factory=dict)

@@ -3,13 +3,15 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from ..core.config.transform_config import config_manager, RULE_REGISTRY
 from ..core.config.transform_version import version_manager
-from ..core.transform import TransformationType, TransformationConfig
-from ..core.security import get_current_user_token, PermissionChecker
+from ..core.data.transform import TransformationType, TransformationConfig
+from ..core.auth.security import get_current_user_token, PermissionChecker
+from ..core.database import db_pool, DatabaseError
+from fastapi import status
 import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/transform", tags=["Transformation Rules"])
+router = APIRouter(prefix="/rules", tags=["Transformation Rules"])
 
 # Permission checker
 require_transform_admin = PermissionChecker(["manage_transformations"])
@@ -28,9 +30,9 @@ class RuleCreate(BaseModel):
     order: int
     config: Dict[str, Any] = {}
 
-@router.get("/rules", response_model=List[Dict[str, Any]])
+@router.get("/", response_model=List[Dict[str, Any]])
 async def list_rules(token = Depends(require_transform_admin)):
-    """List all transformation rules and their configurations"""
+    """List all transformation rules"""
     try:
         configs = config_manager.load_rule_configs()
         return [
@@ -50,12 +52,12 @@ async def list_rules(token = Depends(require_transform_admin)):
             detail="Failed to list transformation rules"
         )
 
-@router.get("/rules/{rule_name}")
+@router.get("/{rule_name}")
 async def get_rule(
     rule_name: str,
     token = Depends(require_transform_admin)
 ):
-    """Get configuration for a specific rule"""
+    """Get a specific rule"""
     config = config_manager.get_rule_config(rule_name)
     if not config:
         raise HTTPException(
@@ -71,7 +73,7 @@ async def get_rule(
         "config": config.config
     }
 
-@router.post("/rules")
+@router.post("/")
 async def create_rule(
     rule: RuleCreate,
     token = Depends(require_transform_admin)
@@ -111,13 +113,13 @@ async def create_rule(
             detail="Failed to create transformation rule"
         )
 
-@router.patch("/rules/{rule_name}")
+@router.patch("/{rule_name}")
 async def update_rule(
     rule_name: str,
     updates: RuleUpdate,
     token = Depends(require_transform_admin)
 ):
-    """Update an existing transformation rule"""
+    """Update a rule"""
     try:
         # Convert model to dict, excluding None values
         update_data = updates.dict(exclude_unset=True)
@@ -146,12 +148,12 @@ async def update_rule(
             detail="Failed to update transformation rule"
         )
 
-@router.delete("/rules/{rule_name}")
+@router.delete("/{rule_name}")
 async def delete_rule(
     rule_name: str,
     token = Depends(require_transform_admin)
 ):
-    """Delete a transformation rule"""
+    """Delete a rule"""
     try:
         config_path = config_manager.config_dir / f"{rule_name}.yaml"
         if not config_path.exists():
@@ -183,12 +185,12 @@ async def delete_rule(
             detail="Failed to delete transformation rule"
         )
 
-@router.post("/rules/{rule_name}/toggle")
+@router.post("/{rule_name}/toggle")
 async def toggle_rule(
     rule_name: str,
     token = Depends(require_transform_admin)
 ):
-    """Toggle a rule's enabled status"""
+    """Toggle rule enabled/disabled state"""
     try:
         config = config_manager.get_rule_config(rule_name)
         if not config:
@@ -217,7 +219,7 @@ async def toggle_rule(
             detail="Failed to toggle transformation rule"
         )
 
-@router.get("/rules/{rule_name}/versions")
+@router.get("/{rule_name}/versions")
 async def list_rule_versions(
     rule_name: str,
     token = Depends(require_transform_admin)
@@ -241,7 +243,7 @@ async def list_rule_versions(
             detail="Failed to list rule versions"
         )
 
-@router.get("/rules/{rule_name}/versions/{version}")
+@router.get("/{rule_name}/versions/{version}")
 async def get_rule_version(
     rule_name: str,
     version: int,
@@ -277,10 +279,9 @@ async def get_rule_version(
             detail="Failed to get rule version"
         )
 
-@router.post("/rules/{rule_name}/versions")
+@router.post("/{rule_name}/versions")
 async def create_rule_version(
     rule_name: str,
-    comment: str = Body(..., embed=True),
     token = Depends(require_transform_admin)
 ):
     """Create a new version of a rule"""
@@ -301,8 +302,7 @@ async def create_rule_version(
                 "enabled": config.enabled,
                 "order": config.order,
                 "config": config.config
-            },
-            comment=comment
+            }
         )
         
         return {
@@ -319,7 +319,7 @@ async def create_rule_version(
             detail="Failed to create rule version"
         )
 
-@router.post("/rules/{rule_name}/rollback/{version}")
+@router.post("/{rule_name}/rollback/{version}")
 async def rollback_rule_version(
     rule_name: str,
     version: int,
@@ -360,7 +360,7 @@ async def rollback_rule_version(
             detail="Failed to rollback rule"
         )
 
-@router.post("/rules/batch")
+@router.post("/batch")
 async def batch_update_rules(
     updates: Dict[str, RuleUpdate],
     token = Depends(require_transform_admin)
@@ -392,4 +392,199 @@ async def batch_update_rules(
         raise HTTPException(
             status_code=500,
             detail="Failed to perform batch update"
+        )
+
+@router.get("/rules")
+async def list_transformation_rules(
+    current_user: Dict[str, Any] = Depends(get_current_user_token)
+) -> List[Dict[str, Any]]:
+    """List all transformation rules."""
+    try:
+        async with db_pool.postgres_connection() as conn:
+            # Get user's organizations
+            org_ids = await conn.fetch("""
+                SELECT organization_id
+                FROM organization_members
+                WHERE user_id = $1
+            """, current_user["id"])
+            
+            if not org_ids:
+                return []
+            
+            # Get transformation rules
+            rules = await conn.fetch("""
+                SELECT 
+                    r.id,
+                    r.name,
+                    r.type,
+                    r.input_table,
+                    r.output_table,
+                    r.transformation,
+                    r.status,
+                    r.order_index,
+                    r.created_at,
+                    r.updated_at
+                FROM transformation_rules r
+                JOIN data_sources ds ON r.input_table = ds.name
+                WHERE ds.organization_id = ANY($1::bigint[])
+                ORDER BY r.order_index
+            """, [org["organization_id"] for org in org_ids])
+            
+            return [dict(rule) for rule in rules]
+            
+    except DatabaseError as e:
+        logger.error(f"Database error listing transformation rules: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error occurred"
+        )
+    except Exception as e:
+        logger.error(f"Error listing transformation rules: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+@router.get("/materialized-views")
+async def list_materialized_views(
+    current_user: Dict[str, Any] = Depends(get_current_user_token)
+) -> List[Dict[str, Any]]:
+    """List all materialized views."""
+    try:
+        async with db_pool.postgres_connection() as conn:
+            # Get user's organizations
+            org_ids = await conn.fetch("""
+                SELECT organization_id
+                FROM organization_members
+                WHERE user_id = $1
+            """, current_user["id"])
+            
+            if not org_ids:
+                return []
+            
+            # Get materialized views
+            views = await conn.fetch("""
+                SELECT 
+                    v.id,
+                    v.name,
+                    v.source_table,
+                    v.refresh_schedule,
+                    v.last_refresh,
+                    v.status,
+                    v.created_at,
+                    v.updated_at
+                FROM materialized_views v
+                JOIN data_sources ds ON v.source_table = ds.name
+                WHERE ds.organization_id = ANY($1::bigint[])
+                ORDER BY v.name
+            """, [org["organization_id"] for org in org_ids])
+            
+            return [dict(view) for view in views]
+            
+    except DatabaseError as e:
+        logger.error(f"Database error listing materialized views: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error occurred"
+        )
+    except Exception as e:
+        logger.error(f"Error listing materialized views: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+@router.get("/sinks")
+async def list_data_sinks(
+    current_user: Dict[str, Any] = Depends(get_current_user_token)
+) -> List[Dict[str, Any]]:
+    """List all data sinks."""
+    try:
+        async with db_pool.postgres_connection() as conn:
+            # Get user's organizations
+            org_ids = await conn.fetch("""
+                SELECT organization_id
+                FROM organization_members
+                WHERE user_id = $1
+            """, current_user["id"])
+            
+            if not org_ids:
+                return []
+            
+            # Get data sinks
+            sinks = await conn.fetch("""
+                SELECT 
+                    s.id,
+                    s.name,
+                    s.type,
+                    s.config,
+                    s.status,
+                    s.created_at,
+                    s.updated_at
+                FROM data_sinks s
+                WHERE s.organization_id = ANY($1::bigint[])
+                ORDER BY s.name
+            """, [org["organization_id"] for org in org_ids])
+            
+            return [dict(sink) for sink in sinks]
+            
+    except DatabaseError as e:
+        logger.error(f"Database error listing data sinks: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error occurred"
+        )
+    except Exception as e:
+        logger.error(f"Error listing data sinks: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+@router.get("/retention-policies")
+async def list_retention_policies(
+    current_user: Dict[str, Any] = Depends(get_current_user_token)
+) -> List[Dict[str, Any]]:
+    """List all retention policies."""
+    try:
+        async with db_pool.postgres_connection() as conn:
+            # Get user's organizations
+            org_ids = await conn.fetch("""
+                SELECT organization_id
+                FROM organization_members
+                WHERE user_id = $1
+            """, current_user["id"])
+            
+            if not org_ids:
+                return []
+            
+            # Get retention policies
+            policies = await conn.fetch("""
+                SELECT 
+                    p.id,
+                    p.name,
+                    p.table_name,
+                    p.retention_days,
+                    p.status,
+                    p.created_at,
+                    p.updated_at
+                FROM retention_policies p
+                JOIN data_sources ds ON p.table_name = ds.name
+                WHERE ds.organization_id = ANY($1::bigint[])
+                ORDER BY p.name
+            """, [org["organization_id"] for org in org_ids])
+            
+            return [dict(policy) for policy in policies]
+            
+    except DatabaseError as e:
+        logger.error(f"Database error listing retention policies: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error occurred"
+        )
+    except Exception as e:
+        logger.error(f"Error listing retention policies: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
         ) 

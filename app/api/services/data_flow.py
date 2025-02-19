@@ -1,14 +1,13 @@
-from typing import Dict, Any, Optional, List
-import asyncio
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
+import logging
+import json
+import asyncio
+
+from ..core.database import db_pool, DatabaseError
+
 from .pipeline import pipeline_service
 from .materialize import materialize_service
-from ..core.database import (
-    get_clickhouse_client,
-    get_questdb_sender,
-    get_postgres_conn
-)
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ class DataFlowService:
         """Archive old data based on retention policies"""
         while self._running:
             try:
-                async with get_postgres_conn() as conn:
+                async with db_pool.postgres_connection() as conn:
                     # Get retention policies
                     policies = await conn.fetch(
                         "SELECT * FROM retention_policies WHERE archival_enabled = true"
@@ -63,9 +62,9 @@ class DataFlowService:
                         # Archive data older than retention period
                         archive_date = datetime.utcnow() - timedelta(days=policy['retention_days'])
                         
-                        with get_clickhouse_client() as client:
+                        async with db_pool.clickhouse_connection() as client:
                             # Move data to archive table
-                            client.execute(f"""
+                            await client.execute(f"""
                                 INSERT INTO {policy['data_type']}_archive
                                 SELECT *
                                 FROM {policy['data_type']}
@@ -73,7 +72,7 @@ class DataFlowService:
                             """, {'archive_date': archive_date})
                             
                             # Delete archived data
-                            client.execute(f"""
+                            await client.execute(f"""
                                 ALTER TABLE {policy['data_type']}
                                 DELETE WHERE timestamp < %(archive_date)s
                             """, {'archive_date': archive_date})
@@ -121,7 +120,7 @@ class DataFlowService:
                     if (not view.last_refresh or 
                         now - view.last_refresh > interval):
                         # Refresh the view
-                        async with materialize_service.pool.acquire() as conn:
+                        async with db_pool.postgres_connection() as conn:
                             await conn.execute(f"REFRESH MATERIALIZED VIEW {view.name}")
                             view.last_refresh = now
                 
@@ -141,20 +140,19 @@ class DataFlowService:
                 }
                 
                 # Get event counts from ClickHouse
-                with get_clickhouse_client() as client:
+                async with db_pool.clickhouse_connection() as client:
                     for table in ['user_interaction_events', 'performance_events', 
                                 'video_events', 'log_events']:
-                        count = client.execute(f"""
+                        count = await client.execute(f"""
                             SELECT count()
                             FROM {table}
                             WHERE timestamp >= now() - INTERVAL 5 MINUTE
-                        """)[0][0]
-                        
-                        metrics['metrics'][f'{table}_count_5m'] = count
+                        """)
+                        metrics['metrics'][f'{table}_count_5m'] = count[0][0]
                 
                 # Store metrics in QuestDB
-                with get_questdb_sender() as sender:
-                    sender.write(
+                async with db_pool.questdb_connection() as sender:
+                    await sender.write(
                         'data_flow_metrics',
                         symbols={'metric_type': 'event_count'},
                         columns=metrics['metrics']

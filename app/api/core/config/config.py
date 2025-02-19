@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "TheData.io Platform"
+    PROJECT_DESCRIPTION: str = "A modern data platform for real-time data processing and analytics"
+    VERSION: str = "1.0.0"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     
@@ -122,6 +124,7 @@ class Settings(BaseSettings):
     ENABLE_SESSION_TRACKING: bool = True
     ENABLE_DATA_QUALITY_CHECKS: bool = True
     ENABLE_AUTO_SCALING: bool = True
+    TRACING_ENABLED: bool = True
     
     # Rate limiting
     API_RATE_LIMIT: int = 1000
@@ -181,6 +184,14 @@ class Settings(BaseSettings):
     # Dagster settings
     DAGSTER_DB_USER: str = "dagster"
     DAGSTER_DB_PASSWORD: str = "changeme123"
+    
+    # Tracing settings
+    OTLP_ENDPOINT: str = "http://localhost:4317"
+    OTLP_HEADERS: str = ""
+    OTLP_SECURE: bool = False
+    TRACE_SAMPLE_RATE: float = 1.0
+    TRACE_EXCLUDED_URLS: List[str] = ["/health", "/metrics"]
+    SERVICE_NAME: str = "thedata-api"
     
     model_config = SettingsConfigDict(
         env_file=".env",

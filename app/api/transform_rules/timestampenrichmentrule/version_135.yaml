@@ -1,0 +1,12 @@
+comment: ''
+config:
+  comment: Rule configuration updated
+  config:
+    config: {}
+    enabled: true
+    name: timestampenrichmentrule
+    order: 1
+    type: timestamp
+  timestamp: '2025-02-18T17:14:07.236216'
+created_at: '2025-02-18T17:14:07.238479'
+version: 135

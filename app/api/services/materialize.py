@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 import asyncio
 import asyncpg
-from ...config import settings
+from ..core.config.settings import settings
 from ..models.timeseries import (
     MaterializedView,
     MaterializedAggregation,
@@ -11,8 +11,7 @@ from ..models.timeseries import (
 )
 import logging
 from datetime import datetime, timedelta
-import psycopg2
-from psycopg2 import pool
+from ..core.database import db_pool, DatabaseError
 from prometheus_client import Counter, Histogram, Gauge
 
 logger = logging.getLogger(__name__)
@@ -90,21 +89,10 @@ class MaterializeService:
     """Service for interacting with Materialize."""
     
     def __init__(self):
-        """Initialize Materialize service with connection pool."""
-        self.pool = pool.SimpleConnectionPool(
-            minconn=1,
-            maxconn=10,
-            **{
-                'host': settings.MATERIALIZE_HOST,
-                'port': settings.MATERIALIZE_PORT,
-                'user': settings.MATERIALIZE_USER,
-                'password': settings.MATERIALIZE_PASSWORD,
-                'database': settings.MATERIALIZE_DATABASE
-            }
-        )
-        # Track active connections using the _used attribute
-        ACTIVE_CONNECTIONS.set_function(lambda: len(self.pool._pool) if hasattr(self.pool, '_pool') else 0)
+        """Initialize Materialize service."""
         self._cleanup_task = None
+        # Track active connections
+        ACTIVE_CONNECTIONS.set_function(lambda: db_pool.get_active_connections())
     
     async def start(self):
         """Start the service and initialize cleanup task."""
@@ -121,50 +109,25 @@ class MaterializeService:
                 pass
             self._cleanup_task = None
     
-    def get_connection(self):
-        """Get a connection from the pool."""
-        return self.pool.getconn()
-    
-    def return_connection(self, conn):
-        """Return a connection to the pool."""
-        self.pool.putconn(conn)
-    
     async def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Execute a query against Materialize with monitoring."""
-        conn = None
         try:
             with QUERY_DURATION.labels(query_type=query.split()[0].lower()).time():
-                conn = self.get_connection()
-                with conn.cursor() as cur:
+                async with db_pool.postgres_connection() as conn:
                     # Convert dict params to list if provided
                     if params:
                         param_list = [params[key] for key in sorted(params.keys())]
-                        cur.execute(query, param_list)
+                        result = await conn.fetch(query, *param_list)
                     else:
-                        cur.execute(query)
+                        result = await conn.fetch(query)
                     
-                    if cur.description:
-                        columns = [desc[0] for desc in cur.description]
-                        results = []
-                        for row in cur.fetchall():
-                            # Convert row to list if it's not already
-                            row_list = list(row) if not isinstance(row, list) else row
-                            # Create dictionary only if we have the same number of columns and values
-                            if len(columns) == len(row_list):
-                                results.append(dict(zip(columns, row_list)))
-                            else:
-                                logger.warning(f"Column count mismatch: {len(columns)} columns vs {len(row_list)} values")
-                                results.append({"raw_data": row_list})
-                        return results
-                    return []
+                    return [dict(row) for row in result]
+                    
         except Exception as e:
             error_type = type(e).__name__
             QUERY_ERRORS.labels(error_type=error_type).inc()
             logger.error(f"Error executing Materialize query: {e}")
             raise
-        finally:
-            if conn:
-                self.return_connection(conn)
     
     async def create_materialized_view(self, view: MaterializedView) -> None:
         """Create a materialized view with monitoring."""
@@ -215,7 +178,7 @@ class MaterializeService:
             creation_time,
             definition
         FROM mz_catalog.mz_views
-        WHERE name = %s
+        WHERE name = $1
         """
         result = await self.execute_query(query, {"name": view_name})
         return result[0] if result else {}
@@ -246,11 +209,6 @@ class MaterializeService:
             except Exception as e:
                 logger.error(f"Error in periodic cleanup: {e}")
             await asyncio.sleep(3600)  # Run every hour
-    
-    def __del__(self):
-        """Cleanup on service deletion."""
-        if hasattr(self, 'pool'):
-            self.pool.closeall()
 
 # Create a singleton instance
 materialize_service = MaterializeService() 

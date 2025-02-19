@@ -36,45 +36,66 @@ services:
     environment:
       - ENVIRONMENT=development
       - PYTHONPATH=/app
-      - POSTGRES_URL=postgresql://postgres:postgres@postgres:5432/postgres?sslmode=disable
+      - API_V1_STR=/api/v1
+      - POSTGRES_DSN=postgresql://postgres:postgres@postgres:5432/postgres?sslmode=disable
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=postgres
+      - REDIS_DSN=redis://redis:6379/0
+      - CLICKHOUSE_URL=clickhouse://clickhouse:8123
+      - QUESTDB_URL=http://questdb:9009
+      - NATS_URL=nats://devtoken123@nats:4222
       - CLICKHOUSE_HOST=clickhouse
       - CLICKHOUSE_PORT=8123
       - CLICKHOUSE_USER=default
       - CLICKHOUSE_PASSWORD=
       - QUESTDB_HOST=questdb
       - QUESTDB_PORT=9009
-      - REDIS_URL=redis://redis:6379/0
-      - NATS_URL=nats://devtoken123@nats:4222
-      - JAEGER_HOST=jaeger
-      - JAEGER_PORT=6831
-      - GRAFANA_URL=http://grafana:3000
-      - PROMETHEUS_URL=http://prometheus:9090
-      - MATERIALIZE_URL=postgres://materialize@materialize:6875/materialize
-      - DAGSTER_HOME=/opt/dagster/dagster_home
-      - DAGSTER_POSTGRES_USER=postgres
-      - DAGSTER_POSTGRES_PASSWORD=postgres
-      - DAGSTER_POSTGRES_DB=dagster
+      - QUESTDB_USER=admin
+      - QUESTDB_PASSWORD=quest
+      - SECRET_KEY=your-secret-key-here
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - TRACING_ENABLED=true
+      - OTLP_ENDPOINT=http://jaeger:4317
+      - OTLP_SECURE=false
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
     volumes:
-      - .:/app
+      - ./app/api:/app/app/api
     working_dir: /app
     depends_on:
-      - postgres
-      - redis
-      - nats
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      questdb:
+        condition: service_healthy
     networks:
       - backend
+      - app_net
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`api.localhost`)"
       - "traefik.http.routers.api.entrypoints=web"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
       - "traefik.http.routers.api.middlewares=cors@file,secure-headers@file,compression@file"
-    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import http.client; conn = http.client.HTTPConnection(\"localhost:8000\"); conn.request(\"GET\", \"/health\"); response = conn.getresponse(); exit(0 if response.status == 200 else 1)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      bash -c "
+        alembic upgrade head &&
+        uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload"
 
   dagster:
     build:
@@ -229,7 +250,7 @@ services:
       start_period: 1s
 
   postgres:
-    image: postgres:15
+    image: postgres:17
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -241,11 +262,11 @@ services:
     networks:
       - backend
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 1s
-      timeout: 1s
-      retries: 30
-      start_period: 1s
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   grafana:
     image: grafana/grafana:10.2.2
@@ -294,9 +315,10 @@ services:
       - backend
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   jaeger:
     image: jaegertracing/all-in-one:1.50

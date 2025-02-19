@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     NATS_URL: str
 
     # Redis settings
-    REDIS_URL: str
+    REDIS_DSN: str
 
     # Materialize settings
     MATERIALIZE_URL: Optional[str] = None

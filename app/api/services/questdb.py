@@ -1,38 +1,19 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-import psycopg2
 import logging
-from ...config import settings
+from ..core.database import db_pool, DatabaseError
 
 logger = logging.getLogger(__name__)
 
 class QuestDBService:
     """Service for interacting with QuestDB."""
     
-    def __init__(self):
-        """Initialize QuestDB service."""
-        self.conn_params = {
-            'host': settings.QUESTDB_HOST,
-            'port': settings.QUESTDB_PORT,
-            'user': settings.QUESTDB_USER,
-            'password': settings.QUESTDB_PASSWORD,
-            'database': settings.QUESTDB_DATABASE
-        }
-    
-    def get_connection(self):
-        """Get a connection to QuestDB."""
-        return psycopg2.connect(**self.conn_params)
-    
     async def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Execute a query against QuestDB."""
         try:
-            with self.get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(query, params or {})
-                    if cur.description:
-                        columns = [desc[0] for desc in cur.description]
-                        return [dict(zip(columns, row)) for row in cur.fetchall()]
-                    return []
+            async with db_pool.questdb_connection() as conn:
+                result = await conn.fetch(query, *(params or ()))
+                return [dict(row) for row in result]
         except Exception as e:
             logger.error(f"Error executing QuestDB query: {e}")
             raise
@@ -49,12 +30,12 @@ class QuestDBService:
         query = f"""
         SELECT {cols}
         FROM {table_name}
-        WHERE timestamp >= %s
-        AND timestamp < %s
+        WHERE timestamp >= $1
+        AND timestamp < $2
         ORDER BY timestamp
         """
         
-        return await self.execute_query(query, (start_time, end_time))
+        return await self.execute_query(query, [start_time, end_time])
     
     async def create_table(self, table_name: str, schema: Dict[str, str]) -> None:
         """Create a new table in QuestDB."""

@@ -34,8 +34,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
     // Check permissions if required
     if (requiredPermissions.length > 0 && user) {
-        const hasRequiredPermissions = requiredPermissions.every(
-            permission => user.permissions.includes(permission)
+        // For now, assume admin users have all permissions
+        // In a real app, you would check actual permissions from the user object
+        const hasRequiredPermissions = user.isAdmin || requiredPermissions.every(
+            permission => user.role === 'admin' || (user.permissions || []).includes(permission)
         );
 
         if (!hasRequiredPermissions) {

@@ -94,6 +94,7 @@ The platform includes comprehensive monitoring:
 ## Documentation
 
 - [Services Documentation](SERVICES.md)
+- [Database Migration System](docs/api/database/README.md)
 - API Documentation: http://localhost:8000/docs
 - Swagger UI: http://localhost:8000/redoc
 

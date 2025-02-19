@@ -4,13 +4,14 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from fastapi import HTTPException
 import logging
+import psutil
 
 from ..models.admin import SystemConfig, MetricsConfig, AlertConfig
 from ..core.config import settings
-from ..core.storage.database import get_postgres_conn
+from ..core.database import db_pool
+from ..core.monitoring.instances import metrics
 from ..core.monitoring.resource_tracking import resource_tracker
-from ..core.storage.query_optimizer import QueryOptimizer
-from ..core.monitoring.metrics import metrics as MetricsCollector
+from ..core.storage.query_optimization import QueryOptimizer
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,83 @@ class AdminService:
         self.config_path = os.getenv("CONFIG_PATH", "config/system_config.json")
         self._load_config()
         self.query_optimizer = QueryOptimizer()
-        self.metrics_collector = MetricsCollector
+        self.metrics_collector = metrics
+        self._resource_tracker_initialized = False
+        
+    async def _ensure_resource_tracker(self):
+        """Ensure resource tracker is initialized"""
+        if not self._resource_tracker_initialized:
+            try:
+                await resource_tracker.start_tracking()
+                self._resource_tracker_initialized = True
+            except Exception as e:
+                logger.error(f"Failed to initialize resource tracker: {e}")
+                
+    def _get_basic_metrics(self) -> Dict[str, Any]:
+        """Get basic system metrics without resource tracker"""
+        try:
+            cpu_percent = psutil.cpu_percent(interval=1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            
+            return {
+                "cpu": {
+                    "usage_percent": cpu_percent,
+                    "above_threshold": cpu_percent > 80
+                },
+                "memory": {
+                    "total": memory.total,
+                    "available": memory.available,
+                    "used": memory.used,
+                    "percent": memory.percent,
+                    "above_threshold": memory.percent > 85
+                },
+                "disk": {
+                    "total": disk.total,
+                    "used": disk.used,
+                    "free": disk.free,
+                    "percent": disk.percent
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting basic metrics: {e}")
+            return {
+                "error": "Failed to get system metrics",
+                "message": str(e)
+            }
+            
+    async def get_system_status(self) -> dict:
+        """Get the current system status."""
+        try:
+            # Try to ensure resource tracker is running
+            await self._ensure_resource_tracker()
+            
+            if self._resource_tracker_initialized:
+                try:
+                    metrics = resource_tracker.get_current_metrics()
+                    health = resource_tracker.check_resource_health()
+                    return {
+                        "status": "ok" if health else "warning",
+                        "metrics": metrics,
+                        "health": health
+                    }
+                except Exception as tracker_error:
+                    logger.warning(f"Resource tracker failed, falling back to basic metrics: {tracker_error}")
+            
+            # Fallback to basic metrics if resource tracker is not available
+            basic_metrics = self._get_basic_metrics()
+            return {
+                "status": "ok" if "error" not in basic_metrics else "warning",
+                "metrics": basic_metrics,
+                "health": True if "error" not in basic_metrics else False
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting system status: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to get system status"
+            )
         
     def _load_config(self) -> None:
         """Load system configuration from file"""
@@ -80,23 +157,6 @@ class AdminService:
             }
         )
             
-    def get_system_status(self) -> dict:
-        """Get the current system status."""
-        try:
-            metrics = resource_tracker.get_system_metrics()
-            health = resource_tracker.check_resource_health()
-            return {
-                "status": "ok" if health else "warning",
-                "metrics": metrics,
-                "health": health
-            }
-        except Exception as e:
-            logger.error(f"Error getting system status: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to get system status"
-            )
-        
     def get_config(self) -> SystemConfig:
         """Get current system configuration"""
         return self.config

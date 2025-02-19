@@ -25,7 +25,7 @@ class QueryOptimizer:
     async def analyze_query(self, query: str) -> Dict[str, Any]:
         """Analyze query execution plan"""
         try:
-            async with db_pool.postgres_connection() as conn:
+            async with db_pool.get_postgres_conn() as conn:
                 # Get query execution plan
                 plan = await conn.fetchval(f"EXPLAIN (FORMAT JSON) {query}")
                 
@@ -145,6 +145,18 @@ class QueryOptimizer:
     def reset_stats(self):
         """Reset query statistics"""
         self.query_stats.clear()
+
+    async def get_table_size(self, table_name: str) -> int:
+        """Get the size of a table in bytes."""
+        try:
+            async with db_pool.get_postgres_conn() as conn:
+                size = await conn.fetchval("""
+                    SELECT pg_total_relation_size($1)
+                """, table_name)
+                return size
+        except Exception as e:
+            logger.error(f"Error getting table size: {e}")
+            return 0
 
 # Create global query optimizer
 query_optimizer = QueryOptimizer() 

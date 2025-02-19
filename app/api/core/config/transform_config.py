@@ -1,7 +1,7 @@
 from typing import Dict, Any, List
 import yaml
 from pathlib import Path
-from ..transform import (
+from ..data.transform import (
     TransformationType,
     TransformationConfig,
     TransformationRule,

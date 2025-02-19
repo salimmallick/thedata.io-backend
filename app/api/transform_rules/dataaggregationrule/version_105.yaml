@@ -1,0 +1,12 @@
+comment: ''
+config:
+  comment: Rule configuration updated
+  config:
+    config: {}
+    enabled: true
+    name: dataaggregationrule
+    order: 5
+    type: aggregation
+  timestamp: '2025-02-18T13:08:35.799625'
+created_at: '2025-02-18T13:08:35.802250'
+version: 105

@@ -1,23 +1,26 @@
+"""
+Security utilities for authentication and authorization.
+"""
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
 from fastapi import HTTPException, status, Depends, Request, Security
 from ...models.user import TokenData, UserRole
-from ..config import settings
-from ..storage.database import get_postgres_conn
 from ...models.organization import Organization
+from ..config import settings
+from ..storage import db_pool
+from pydantic import BaseModel
+from ..logging.logger import logger
+from ..monitoring.metrics import metrics
 import hmac
 import hashlib
 import time
 import json
-import logging
-from fastapi.security import APIKeyHeader
-from ..storage.redis import redis
-from ..monitoring.metrics import metrics
 import ipaddress
 import os
+import logging
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -29,10 +32,22 @@ SIGNATURE_HEADER = APIKeyHeader(name="X-Signature", auto_error=False)
 TIMESTAMP_HEADER = APIKeyHeader(name="X-Timestamp", auto_error=False)
 
 # Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=12,
+    bcrypt__min_rounds=12
+)
 
 # OAuth2 scheme for token authentication
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify password against hash."""
@@ -87,14 +102,9 @@ async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         }
     return None
 
-async def authenticate_user(email: str, password: str) -> Optional[Dict[str, Any]]:
-    """Authenticate user with email and password."""
-    user = await get_user_by_email(email)
-    if not user:
-        return None
-    if not verify_password(password, user["hashed_password"]):
-        return None
-    return user
+async def authenticate_user(plain_password: str, hashed_password: str) -> bool:
+    """Authenticate user by verifying password."""
+    return verify_password(plain_password, hashed_password)
 
 async def get_current_user(token: str) -> Dict[str, Any]:
     """Get current user from token."""
@@ -109,38 +119,29 @@ async def get_current_user(token: str) -> Dict[str, Any]:
     
     return user
 
-async def get_current_user_token(token: str = Depends(oauth2_scheme)) -> TokenData:
-    """Decode and validate JWT token."""
+async def get_current_user_token(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
+    """Get current user from token."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
     try:
-        payload = jwt.decode(
-            token, 
-            settings.SECRET_KEY, 
-            algorithms=[settings.ALGORITHM]
-        )
-        sub = payload.get("sub")
-        email = payload.get("email")
-        if sub is None or email is None:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
             raise credentials_exception
-        
-        role = payload.get("role", UserRole.VIEWER)
-        permissions = payload.get("permissions", [])
-        
-        token_data = TokenData(
-            sub=sub,
-            email=email,
-            role=role,
-            permissions=permissions
-        )
-        return token_data
-        
     except JWTError:
         raise credentials_exception
+        
+    async with db_pool.postgres_connection() as conn:
+        user = await conn.fetchrow(
+            "SELECT * FROM users WHERE email = $1",
+            email
+        )
+        if user is None:
+            raise credentials_exception
+        return dict(user)
 
 def check_permissions(required_permissions: list[str], token_data: TokenData) -> bool:
     """Check if user has required permissions."""
@@ -152,13 +153,27 @@ class PermissionChecker:
     def __init__(self, required_permissions: list[str]):
         self.required_permissions = required_permissions
     
-    def __call__(self, token_data: TokenData = Depends(get_current_user_token)):
-        if not check_permissions(self.required_permissions, token_data):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not enough permissions"
+    async def __call__(self, current_user: dict = Depends(get_current_user_token)):
+        async with db_pool.postgres_connection() as conn:
+            user_permissions = await conn.fetch(
+                """
+                SELECT p.name
+                FROM permissions p
+                JOIN role_permissions rp ON p.id = rp.permission_id
+                JOIN user_roles ur ON rp.role = ur.role
+                WHERE ur.user_id = $1
+                """,
+                current_user["id"]
             )
-        return token_data
+            user_permissions = [p["name"] for p in user_permissions]
+            
+            for permission in self.required_permissions:
+                if permission not in user_permissions:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Missing required permission: {permission}"
+                    )
+            return current_user
 
 class SecurityMiddleware:
     """Security middleware for request validation and audit logging"""

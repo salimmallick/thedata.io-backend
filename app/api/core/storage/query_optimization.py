@@ -5,7 +5,7 @@ import re
 import logging
 from datetime import datetime, timedelta
 from ..monitoring.metrics import metrics
-from .database_pool import db_pool
+from ..database import db_pool
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +91,9 @@ class QueryOptimizer:
     ) -> Dict[str, Any]:
         """Analyze query execution and gather performance data"""
         try:
-            # Get query execution plan
-            plan_data = await self._get_execution_plan(query, database)
+            async with db_pool.postgres_connection() as conn:
+                # Get query execution plan
+                plan_data = await self._get_execution_plan(query, database)
             
             # Normalize and store pattern
             pattern = self._normalize_query(query)

@@ -192,24 +192,31 @@ class ResourceTracker:
     
     def _update_prometheus_metrics(self, metrics_data: Dict[str, Any]):
         """Update Prometheus metrics"""
-        # CPU metrics
-        if isinstance(metrics_data["cpu"]["usage_percent"], list):
-            for i, cpu_percent in enumerate(metrics_data["cpu"]["usage_percent"]):
-                metrics.cpu_usage_percent.labels(cpu=f"cpu{i}").set(cpu_percent)
-        else:
-            metrics.cpu_usage_percent.labels(cpu="total").set(metrics_data["cpu"]["usage_percent"])
-        
-        # Memory metrics
-        metrics.memory_usage_bytes.set(metrics_data["memory"]["used"])
-        metrics.memory_usage_percent.set(metrics_data["memory"]["percent"])
-        
-        # Disk metrics
-        metrics.disk_usage_bytes.set(metrics_data["disk"]["used"])
-        metrics.disk_usage_percent.set(metrics_data["disk"]["percent"])
-        
-        # Network metrics
-        metrics.network_bytes_sent.set(metrics_data["network"]["bytes_sent"])
-        metrics.network_bytes_received.set(metrics_data["network"]["bytes_recv"])
+        try:
+            # CPU metrics
+            if isinstance(metrics_data["cpu"]["usage_percent"], list):
+                for i, cpu_percent in enumerate(metrics_data["cpu"]["usage_percent"]):
+                    metrics.cpu_usage_percent.labels(cpu=f"cpu{i}").set(cpu_percent)
+            else:
+                metrics.cpu_usage_percent.labels(cpu="total").set(metrics_data["cpu"]["usage_percent"])
+            
+            # Memory metrics
+            metrics.memory_usage_bytes.labels(type="used").set(metrics_data["memory"]["used"])
+            metrics.memory_usage_bytes.labels(type="total").set(metrics_data["memory"]["total"])
+            if "swap_used" in metrics_data["memory"]:
+                metrics.memory_usage_bytes.labels(type="swap").set(metrics_data["memory"]["swap_used"])
+            
+            # Disk metrics
+            metrics.disk_usage_bytes.labels(type="used").set(metrics_data["disk"]["used"])
+            metrics.disk_usage_bytes.labels(type="total").set(metrics_data["disk"]["total"])
+            metrics.disk_usage_bytes.labels(type="read").set(metrics_data["disk"]["read_bytes"])
+            metrics.disk_usage_bytes.labels(type="write").set(metrics_data["disk"]["write_bytes"])
+            
+            # Network metrics
+            metrics.network_usage_bytes.labels(direction="sent").inc(metrics_data["network"]["bytes_sent"])
+            metrics.network_usage_bytes.labels(direction="received").inc(metrics_data["network"]["bytes_recv"])
+        except Exception as e:
+            logger.error(f"Error in resource tracking: {str(e)}")
     
     async def _cleanup_history(self):
         """Clean up old history entries"""
